@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-ignore-list
+data:
+  ignore_reasons: |
+    not_logged_in
+    invalid_session
+    anonymous_user
+    test_traffic

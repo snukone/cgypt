@@ -1,0 +1,22 @@
+apiVersion: builtin
+kind: ExecGenerator
+metadata:
+  name: generate-alert-ignore-rules
+command: ["bash", "-c"]
+args:
+  - |
+    echo "apiVersion: monitoring.coreos.com/v1"
+    echo "kind: PrometheusRule"
+    echo "metadata:"
+    echo "  name: alert-ignore-list-rules"
+    echo "spec:"
+    echo "  groups:"
+    echo "    - name: alert-ignore-list"
+    echo "      rules:"
+    while IFS= read -r reason; do
+      [[ -z \"$reason\" ]] && continue
+      echo "        - record: ignore_reasons"
+      echo "          expr: vector(1)"
+      echo "          labels:"
+      echo "            reason: \"$reason\""
+    done < ignore_reasons.txt
