@@ -99,7 +99,7 @@ func processRepo(repo, commitMessage string, allowedBranches []string, dryRun bo
 	}
 }
 
-func checkoutRepo(url, branch, targetDir string, dryRun bool, wg *sync.WaitGroup, logger *log.Logger) {
+func checkoutRepo(providerURL, repoName, branch, targetDir string, dryRun bool, wg *sync.WaitGroup, logger *log.Logger) {
 	defer wg.Done()
 
 	if _, err := os.Stat(targetDir); err == nil {
@@ -107,11 +107,12 @@ func checkoutRepo(url, branch, targetDir string, dryRun bool, wg *sync.WaitGroup
 		return
 	}
 
+	fullURL := strings.TrimRight(providerURL, "/") + "/" + repoName + ".git"
 	args := []string{"clone"}
 	if branch != "" {
 		args = append(args, "-b", branch)
 	}
-	args = append(args, url, targetDir)
+	args = append(args, fullURL, targetDir)
 
 	cmd := exec.Command("git", args...)
 	if err := run(cmd, dryRun); err != nil {
@@ -140,15 +141,37 @@ func readLines(filePath string) ([]string, error) {
 }
 
 func main() {
-	dryRun := flag.Bool("dry", false, "Dry-Run (nur anzeigen, keine Änderungen)")
+	// Flags
+	dryRun := flag.Bool("dry", false, "Dry-Run: zeigt nur Befehle, führt sie nicht aus")
 	branches := flag.String("branch", "", "Erlaubte Branches, Komma-getrennt")
-	repoFile := flag.String("repo-file", "", "Textdatei mit Repo-Namen für commit/push oder URLs für checkout")
+	repoFile := flag.String("repo-file", "", "Textdatei mit Repo-Namen (eine Zeile = ein Repo)")
 	parallel := flag.Int("parallel", 8, "Anzahl paralleler Jobs")
 	checkout := flag.Bool("checkout", false, "Repos aus Liste auschecken")
+	providerURL := flag.String("provider-url", "", "Git Provider Basis-URL (z.B. https://bitbucket.org/meinteam)")
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Git-Multi-Tool\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags] \"Commit Message\"\n\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(flag.CommandLine.Output(), "\nExamples:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  # Commit & Push auf alle Repos im repo-file, nur Branch main oder develop, Dry-Run\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s -repo-file repos.txt -branch main,develop -dry \"Update all repos\"\n\n", os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "  # Checkout aller Repos aus Liste, mit Bitbucket URL, max 8 parallel\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %s -repo-file repos.txt -checkout -provider-url https://bitbucket.org/meinteam -parallel 8\n\n", os.Args[0])
+	}
+
 	flag.Parse()
 
 	if *repoFile == "" {
-		fmt.Println("Bitte -repo-file angeben!")
+		fmt.Println("Fehler: Bitte -repo-file angeben!")
+		flag.Usage()
+		return
+	}
+
+	if *checkout && *providerURL == "" {
+		fmt.Println("Fehler: Bitte -provider-url für Checkout angeben!")
+		flag.Usage()
 		return
 	}
 
@@ -176,18 +199,19 @@ func main() {
 	sem := make(chan struct{}, *parallel)
 
 	if *checkout {
-		for _, url := range lines {
-			targetDir := strings.TrimSuffix(filepath.Base(url), ".git")
+		for _, repoName := range lines {
+			targetDir := repoName
 			wg.Add(1)
 			sem <- struct{}{}
-			go func(url, dir string) {
+			go func(repoName, dir string) {
 				defer func() { <-sem }()
-				checkoutRepo(url, "", dir, *dryRun, &wg, logger)
-			}(url, targetDir)
+				checkoutRepo(*providerURL, repoName, "", dir, *dryRun, &wg, logger)
+			}(repoName, targetDir)
 		}
 	} else {
 		if flag.NArg() < 1 {
 			fmt.Println("Bitte Commit Message angeben!")
+			flag.Usage()
 			return
 		}
 		commitMessage := flag.Arg(0)
